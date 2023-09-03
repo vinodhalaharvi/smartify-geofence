@@ -1,4 +1,4 @@
-module github.com/smartify/smartify-livetable
+module github.com/smartify/smartify-geofence
 
 go 1.19
 

@@ -1,4 +1,4 @@
 ```shell
 go build
-./smartify-livetable
-```# smartify-livetable
+./smartify-geofence
+```# smartify-geofence

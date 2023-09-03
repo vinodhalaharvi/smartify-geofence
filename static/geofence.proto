@@ -1,0 +1,51 @@
+syntax = "proto3";
+//import "google/protobuf/empty.proto";
+
+option go_package = "./pb";
+
+package geofence;
+
+// A single point on the map represented by latitude and longitude.
+message Point {
+  double latitude = 1;
+  double longitude = 2;
+}
+
+// A polygon represented as a series of points.
+message Polygon {
+  string id = 1;               // Unique identifier for this polygon
+  string name = 2;             // Friendly name for this polygon
+  repeated Point vertices = 3; // Vertices of the polygon
+}
+
+// Request message to add one or more polygons for filtering.
+message AddPolygonsRequest {
+  repeated Polygon polygons = 1; // The polygons to be added
+}
+
+// A single location represented by latitude and longitude.
+message Location {
+  double latitude = 1;
+  double longitude = 2;
+}
+
+// A single location represented by latitude and longitude, along with the ID of the polygon it belongs to.
+message FencedLocation {
+  double latitude = 1;
+  double longitude = 2;
+  string polygon_id = 3; // The ID of the polygon this location falls within.
+}
+
+// The service definition for GeoFence Labeling Server.
+// Currently this is a placeholder for the service definition.
+// websocket is used for streaming data.
+//service GeoFenceLabelingServer {
+//  // Add polygons to the geo-fence for tracking.
+//  rpc AddPolygonsForGeoFencing(AddPolygonsRequest) returns (google.protobuf.Empty);
+//
+//  // A server-side streaming RPC for sending fenced locations.
+//  rpc StreamFencedLocations(google.protobuf.Empty) returns (stream FencedLocation);
+//
+//  //  // A server-side streaming RPC for receiving a stream of Locations from the Location Stream Server.
+//  //  rpc ReceiveLocationsFromSource(google.protobuf.Empty) returns (stream Location);
+//}

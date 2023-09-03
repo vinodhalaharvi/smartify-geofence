@@ -4,7 +4,7 @@
 </template>
 
 <script>
-import LiveDataTable from "@/components/LiveDataTable.vue";
+import LiveDataTable from "@/components/GeoFenceTable.vue";
 
 export default {
   name: 'App',

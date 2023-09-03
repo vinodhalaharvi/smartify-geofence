@@ -1,19 +1,22 @@
 <template>
   <div>
     <div>
-      <input v-model="searchTerm" placeholder="Search"/>
+      <input v-model="searchTerm" placeholder="Search by Polygon ID"/>
     </div>
     <table>
       <thead>
       <tr>
-        <th>Name</th>
-        <th>Age</th>
+        <th>Latitude</th>
+        <th>Longitude</th>
+        <th>Polygon ID</th>
       </tr>
       </thead>
       <tbody>
-      <tr v-for="row in filteredRows.slice((currentPage - 1) * pageSize, currentPage * pageSize)" :key="row.id">
-        <td>{{ row.name }}</td>
-        <td>{{ row.age }}</td>
+      <tr v-for="location in filteredLocations.slice((currentPage - 1) * pageSize, currentPage * pageSize)"
+          :key="location.id">
+        <td>{{ location.latitude }}</td>
+        <td>{{ location.longitude }}</td>
+        <td>{{ location.polygonId }}</td>
       </tr>
       </tbody>
     </table>
@@ -23,35 +26,30 @@
     </div>
   </div>
 </template>
+
 <script>
 import protobuf from "protobufjs";
 import {computed, ref} from "vue";
 
 export default {
   setup() {
-    const tableData = ref({rows: []});
+    const locations = ref([]);
     const searchTerm = ref("");
     const currentPage = ref(1);
     const pageSize = ref(50);
 
-    // Protobuf schema hardcoded as a string
     const protoSchema = `
       syntax = "proto3";
-      message TableData {
-        repeated Row rows = 1;
-      }
-      message Row {
-        string name = 1;
-        int32 age = 2;
-        int64 id = 3;
+      message FencedLocation {
+        double latitude = 1;
+        double longitude = 2;
+        string polygonId = 3;
       }
     `;
 
-    // Parse the .proto schema
     const root = protobuf.parse(protoSchema).root;
-    const TableData = root.lookupType("TableData");
+    const FencedLocation = root.lookupType("FencedLocation");
 
-    // WebSocket connection
     console.log("Connecting to WebSocket");
     const socket = new WebSocket("ws://localhost:8080/data");
 
@@ -59,37 +57,34 @@ export default {
       const reader = new FileReader();
       reader.onload = () => {
         const buffer = new Uint8Array(reader.result);
-        const value = TableData.decode(buffer);
+        const value = FencedLocation.decode(buffer);
         console.log("Decoded value:", value);
-        tableData.value.rows = [...value.rows, ...tableData.value.rows];
+        locations.value = [value, ...locations.value];
       };
       reader.readAsArrayBuffer(event.data);
     };
 
-
-    // Filtered rows based on search term
-    const filteredRows = computed(() => {
-      return tableData.value.rows.filter((row) =>
-          row.name.toLowerCase().includes(searchTerm.value.toLowerCase())); // Note: Updated to "name"
+    const filteredLocations = computed(() => {
+      return locations.value.filter((location) =>
+          location.polygonId.toLowerCase().includes(searchTerm.value.toLowerCase())
+      );
     });
 
-    // Pagination
     const pageCount = computed(() => {
-      return Math.ceil(filteredRows.value.length / pageSize.value);
+      return Math.ceil(filteredLocations.value.length / pageSize.value);
     });
 
     return {
-      tableData,
+      locations,
       searchTerm,
       currentPage,
       pageSize,
       pageCount,
-      filteredRows,
+      filteredLocations,
     };
   },
 };
 </script>
-
 
 <style scoped>
 div {
