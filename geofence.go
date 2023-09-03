@@ -1,13 +1,14 @@
 package main
 
 import (
+	"log"
+	"math/rand"
+	"time"
+
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 	"github.com/smartify/smartify-geofence/pb" // Replace with your actual protobuf package
 	"google.golang.org/protobuf/proto"
-	"log"
-	"math/rand"
-	"net/http"
 )
 
 var upgrader = websocket.Upgrader{
@@ -16,21 +17,18 @@ var upgrader = websocket.Upgrader{
 }
 
 func main() {
-	repo := NewInMemoryGeoFenceRepository()
-	server := NewGeoFenceServer(repo)
-
 	r := gin.Default()
 	r.GET("/ws", func(c *gin.Context) {
-		HandleConnections(c.Writer, c.Request, server)
+		serveWs(c)
 	})
 	err := r.Run(":8080")
 	if err != nil {
-		log.Fatalln("Could not start server:", err)
+		return
 	}
 }
 
-func HandleConnections(w http.ResponseWriter, r *http.Request, server *GeoFenceServer) {
-	conn, err := upgrader.Upgrade(w, r, nil)
+func serveWs(c *gin.Context) {
+	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
 		log.Println(err)
 		return
@@ -38,55 +36,98 @@ func HandleConnections(w http.ResponseWriter, r *http.Request, server *GeoFenceS
 	defer func(conn *websocket.Conn) {
 		err := conn.Close()
 		if err != nil {
-			log.Printf("Could not close connection: %v", err)
+			log.Printf("Error closing connection: %s", err)
 		}
 	}(conn)
 
+	geoFenceServer := NewGeoFenceServer(NewInMemoryGeoFenceRepository())
+
+	go handleIncomingRequests(conn, geoFenceServer)
+	go sendFencedLocations(conn, geoFenceServer)
+
+	select {} // Keep the goroutines running
+}
+
+func handleIncomingRequests(conn *websocket.Conn, geoFenceServer *GeoFenceServer) {
 	for {
 		messageType, p, err := conn.ReadMessage()
 		if err != nil {
-			log.Println(err)
+			log.Println("read:", err)
 			return
 		}
+
 		if messageType == websocket.BinaryMessage {
-			addPolygonsReq := &pb.AddPolygonsRequest{}
-			if err := proto.Unmarshal(p, addPolygonsReq); err != nil {
-				log.Println("Could not unmarshal AddPolygonsRequest:", err)
-			} else {
-				log.Println("Received AddPolygonsRequest")
-				for _, polygon := range addPolygonsReq.Polygons {
-					err := server.Repo.Store(polygon)
-					if err != nil {
-						log.Printf("Could not store polygon: %v", err)
-					}
+			addPolygonsRequest := &pb.AddPolygonsRequest{}
+			if err := proto.Unmarshal(p, addPolygonsRequest); err != nil {
+				log.Println("Failed to parse AddPolygonsRequest:", err)
+				return
+			}
+
+			for _, polygon := range addPolygonsRequest.Polygons {
+				if err := geoFenceServer.Repo.Store(polygon); err != nil {
+					log.Println("Error storing polygon:", err)
+					return
 				}
 			}
-		}
-
-		// Send fenced location data
-		fencedLocation := &pb.FencedLocation{ /* populate fields here */ }
-		data, err := proto.Marshal(fencedLocation)
-		if err != nil {
-			log.Println("Could not marshal FencedLocation:", err)
-		} else {
-			log.Println("Sending FencedLocation")
-			if err := conn.WriteMessage(websocket.BinaryMessage, data); err != nil {
-				log.Println("Could not send FencedLocation:", err)
-			}
+			log.Printf("Received AddPolygonsRequest with %d polygons.", len(addPolygonsRequest.Polygons))
 		}
 	}
 }
 
-type GeoFenceServer struct {
-	Repo *InMemoryGeoFenceRepository
+func sendFencedLocations(conn *websocket.Conn, geoFenceServer *GeoFenceServer) {
+	for {
+		location := getRandomLocation()
+		for _, polygon := range geoFenceServer.Repo.GetPolygons() {
+			if IsPointInPolygon(location.Latitude, location.Longitude, polygon) {
+				fencedLocation := &pb.FencedLocation{
+					Latitude:  location.Latitude,
+					Longitude: location.Longitude,
+					PolygonId: polygon.Id,
+				}
+
+				out, err := proto.Marshal(fencedLocation)
+				if err != nil {
+					log.Println("Failed to encode FencedLocation:", err)
+					return
+				}
+
+				if err := conn.WriteMessage(websocket.BinaryMessage, out); err != nil {
+					log.Println("write:", err)
+					return
+				}
+				log.Printf("Sent FencedLocation for Polygon ID %s.", polygon.Id)
+			}
+		}
+		time.Sleep(1 * time.Second)
+	}
 }
 
-func NewGeoFenceServer(repo *InMemoryGeoFenceRepository) *GeoFenceServer {
-	return &GeoFenceServer{Repo: repo}
-}
-
-func GetRandomLocation() *pb.Location {
-	lat := rand.Float64() * 180
-	long := rand.Float64() * 360
+func getRandomLocation() *pb.Location {
+	lat := randomNoise(38.9072)
+	long := randomNoise(-77.0369)
 	return &pb.Location{Latitude: lat, Longitude: long}
+}
+
+func randomNoise(coord float64) float64 {
+	return coord + rand.Float64()/100
+}
+
+func IsPointInPolygon(x, y float64, polygon *pb.Polygon) bool {
+	n := len(polygon.Vertices)
+	if n < 3 {
+		return false
+	}
+
+	inside := false
+	for i, j := 0, n-1; i < n; j, i = i, i+1 {
+		xi, yi := polygon.Vertices[i].Latitude, polygon.Vertices[i].Longitude
+		xj, yj := polygon.Vertices[j].Latitude, polygon.Vertices[j].Longitude
+
+		intersect := ((yi > y) != (yj > y)) &&
+			(x < (xj-xi)*(y-yi)/(yj-yi)+xi)
+		if intersect {
+			inside = !inside
+		}
+	}
+	return inside
 }
