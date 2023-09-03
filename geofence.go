@@ -5,6 +5,7 @@ import (
 	"math/rand"
 	"time"
 
+	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 	"github.com/smartify/smartify-geofence/pb" // Replace with your actual protobuf package
@@ -18,7 +19,15 @@ var upgrader = websocket.Upgrader{
 
 func main() {
 	r := gin.Default()
-	r.GET("/ws", func(c *gin.Context) {
+	// Add CORS middleware
+	config := cors.DefaultConfig()
+	config.AllowAllOrigins = true
+	config.AllowMethods = []string{"GET", "POST", "PUT", "DELETE"}
+	config.AllowHeaders = []string{"Origin", "Content-Length", "Content-Type"}
+	r.Use(cors.New(config))
+
+	r.Static("/static", "./static")
+	r.GET("/data", func(c *gin.Context) {
 		serveWs(c)
 	})
 	err := r.Run(":8080")

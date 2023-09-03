@@ -10,7 +10,20 @@ type GeoFenceServer struct {
 }
 
 func NewGeoFenceServer(repo *InMemoryGeoFenceRepository) *GeoFenceServer {
-	return &GeoFenceServer{Repo: repo}
+	server := GeoFenceServer{Repo: repo}
+	err := repo.Store(
+		&pb.Polygon{
+			Vertices: []*pb.Point{
+				&pb.Point{
+					Latitude:  38.9072,
+					Longitude: -77.0369,
+				},
+			},
+		})
+	if err != nil {
+		return nil
+	}
+	return &server
 }
 
 func GetRandomLocation() *pb.Location {
