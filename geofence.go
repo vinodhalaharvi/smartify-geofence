@@ -41,7 +41,10 @@ func main() {
 	r.GET("/ws", func(c *gin.Context) {
 		serveData(c)
 	})
-	r.Run(":8080")
+	err := r.Run(":8080")
+	if err != nil {
+		log.Fatalf("Error running server: %v", err)
+	}
 }
 
 func serveData(c *gin.Context) {
@@ -50,7 +53,12 @@ func serveData(c *gin.Context) {
 		log.Println(err)
 		return
 	}
-	defer conn.Close()
+	defer func(conn *websocket.Conn) {
+		err := conn.Close()
+		if err != nil {
+			log.Printf("Error closing connection: %v", err)
+		}
+	}(conn)
 
 	geoFenceServer := NewGeoFenceServer(NewInMemoryGeoFenceRepository())
 
