@@ -1,23 +1,47 @@
 package main
 
 import (
-	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
-	"github.com/golang/protobuf/proto"
 	"github.com/gorilla/websocket"
-	"github.com/smartify/smartify-geofence/pb" // make sure this import path is correct
+	"github.com/smartify/smartify-geofence/pb"
+	"google.golang.org/protobuf/proto"
 	"log"
 	"math/rand"
-	"net/http"
 	"time"
 )
 
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
-	CheckOrigin: func(r *http.Request) bool {
-		return true // Allow all origins
-	},
+}
+
+type GeoFenceServer struct {
+	Repo GeoFenceRepository
+}
+
+func NewGeoFenceServer(
+	repo GeoFenceRepository,
+) *GeoFenceServer {
+	server := GeoFenceServer{Repo: repo}
+	server.Repo = repo
+	err := repo.Store(&pb.Polygon{
+		Id: "1",
+		Vertices: []*pb.Point{
+			{Latitude: 38.9072, Longitude: -77.0369},
+		},
+	})
+	if err != nil {
+		return nil
+	}
+	return &server
+}
+
+func main() {
+	r := gin.Default()
+	r.GET("/ws", func(c *gin.Context) {
+		serveData(c)
+	})
+	r.Run(":8080")
 }
 
 func serveData(c *gin.Context) {
@@ -26,52 +50,90 @@ func serveData(c *gin.Context) {
 		log.Println(err)
 		return
 	}
-	defer func(conn *websocket.Conn) {
-		err := conn.Close()
-		if err != nil {
-			log.Printf("Error closing connection: %v", err)
-		}
-	}(conn)
+	defer conn.Close()
+
+	geoFenceServer := NewGeoFenceServer(NewInMemoryGeoFenceRepository())
 
 	for {
-		// Simulate generating FencedLocation data (replace this with real data)
-		fencedLocation := &pb.FencedLocation{
-			Latitude:  38.9072 + rand.Float64(),
-			Longitude: -77.0369 + rand.Float64(),
-			PolygonId: "0",
-		}
-
-		out, err := proto.Marshal(fencedLocation)
+		messageType, p, err := conn.ReadMessage()
 		if err != nil {
-			log.Println("Failed to encode data:", err)
+			log.Println("Error while reading message:", err)
 			return
 		}
 
-		if err := conn.WriteMessage(websocket.BinaryMessage, out); err != nil {
-			log.Println("Write error:", err)
-			return
+		if messageType == websocket.BinaryMessage {
+			// Handle AddPolygonsRequest
+			addPolygonsRequest := &pb.AddPolygonsRequest{}
+			if err := proto.Unmarshal(p, addPolygonsRequest); err != nil {
+				log.Println("Failed to parse AddPolygonsRequest:", err)
+				return
+			}
+
+			// Store or process the polygons
+			for _, polygon := range addPolygonsRequest.Polygons {
+				if err := geoFenceServer.Repo.Store(polygon); err != nil {
+					log.Println("Error storing polygon:", err)
+					return
+				}
+			}
+
+			log.Printf("Received polygons")
 		}
 
-		// Add a delay or a trigger for new data
-		time.Sleep(10 * time.Second)
+		// Continue sending FencedLocation or whatever you are sending
+		location := getRandomLocation()
+		for _, polygon := range geoFenceServer.Repo.GetPolygons() {
+			if IsPointInPolygon(location.Latitude, location.Longitude, polygon) {
+				fencedLocation := &pb.FencedLocation{
+					Latitude:  location.Latitude,
+					Longitude: location.Longitude,
+					PolygonId: polygon.Id,
+				}
+
+				out, err := proto.Marshal(fencedLocation)
+				if err != nil {
+					log.Println("Failed to encode FencedLocation:", err)
+					return
+				}
+
+				if err := conn.WriteMessage(websocket.BinaryMessage, out); err != nil {
+					log.Println("Write error:", err)
+					return
+				}
+			}
+		}
+		time.Sleep(1 * time.Second)
 	}
 }
 
-func main() {
-	r := gin.Default()
+// getRandomLocation function for demonstration
+func getRandomLocation() *pb.Location {
+	lat := randomNoise(38.9072)
+	long := randomNoise(-77.0369)
+	return &pb.Location{Latitude: lat, Longitude: long}
+}
 
-	// Add CORS middleware
-	config := cors.DefaultConfig()
-	config.AllowAllOrigins = true
-	config.AllowMethods = []string{"GET", "POST", "PUT", "DELETE"}
-	config.AllowHeaders = []string{"Origin", "Content-Length", "Content-Type"}
-	r.Use(cors.New(config))
+func randomNoise(coord float64) float64 {
+	return coord + rand.Float64()/100
+}
 
-	r.Static("/static", "./static")
-	r.GET("/data", serveData)
-
-	// Start the server
-	if err := r.Run(":8080"); err != nil {
-		panic(err)
+// IsPointInPolygon checks if a point (x, y) is inside a given polygon
+func IsPointInPolygon(x, y float64, polygon *pb.Polygon) bool {
+	n := len(polygon.Vertices)
+	if n < 3 {
+		return false
 	}
+
+	inside := false
+	for i, j := 0, n-1; i < n; j, i = i, i+1 {
+		xi, yi := polygon.Vertices[i].Latitude, polygon.Vertices[i].Longitude
+		xj, yj := polygon.Vertices[j].Latitude, polygon.Vertices[j].Longitude
+
+		intersect := ((yi > y) != (yj > y)) &&
+			(x < (xj-xi)*(y-yi)/(yj-yi)+xi)
+		if intersect {
+			inside = !inside
+		}
+	}
+	return inside
 }
